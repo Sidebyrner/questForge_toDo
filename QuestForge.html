@@ -87,7 +87,7 @@
     const DEFAULT_STATE = {
       character: { name: "Hero", body: "🧑", hat: "🎩", companion: "🐉", title: "Wanderer" },
       level: 1, xp: 0, totalXP: 0,
-      quests: [], completedQuests: [], inventory: [], badges: [], bossQuests: [],
+      quests: [], completedQuests: [], inventory: [], badges: [], bossQuests: [], mainQuests: [],
       dailyStreak: 0, weeklyStreak: 0, monthlyStreak: 0,
       lastCompletionDate: null, combo: 0, lastComboTime: null, maxCombo: 0,
       stats: { totalCompleted: 0, bossesDefeated: 0, epicCompleted: 0, categoriesCompleted: [], totalLoot: 0 },
@@ -100,6 +100,7 @@
         const p = JSON.parse(raw);
         if (!p.stats) p.stats = { ...DEFAULT_STATE.stats };
         if (!Array.isArray(p.stats.categoriesCompleted)) p.stats.categoriesCompleted = [];
+        if (!Array.isArray(p.mainQuests)) p.mainQuests = [];
         return { ...DEFAULT_STATE, ...p, stats: { ...DEFAULT_STATE.stats, ...p.stats } };
       } catch { return DEFAULT_STATE; }
     }
@@ -152,8 +153,10 @@
       const [notification, setNotification] = useState(null);
       const [levelUpAnim, setLevelUpAnim]   = useState(false);
       const [floats, setFloats]             = useState([]);
-      const [qf, setQf] = useState({ name: "", desc: "", difficulty: "Easy", category: "Work", recurring: "none" });
+      const [qf, setQf] = useState({ name: "", desc: "", difficulty: "Easy", category: "Work", recurring: "none", mainQuestId: null });
       const [bf, setBf] = useState({ name: "", steps: ["","",""] });
+      const [mf, setMf] = useState({ name: "", desc: "", category: "Work", targetXP: 500 });
+      const [showNewMainQuest, setShowNewMainQuest] = useState(false);
       const [archiveFilter, setArchiveFilter] = useState({ category: "all", difficulty: "all", search: "" });
       const nt = useRef(null);
 
@@ -226,6 +229,15 @@
           const ns = { ...prev.stats, totalCompleted: prev.stats.totalCompleted + 1, epicCompleted: prev.stats.epicCompleted + (q.difficulty === "Epic" ? 1 : 0), categoriesCompleted: [...cats], totalLoot: prev.stats.totalLoot + (loot ? 1 : 0) };
           const cq = { ...q, completedAt: new Date().toISOString(), xpEarned: xpGain };
           const next = { ...prev, ...xd, ...cd, ...sd, quests: prev.quests.filter(x => x.id !== qid), completedQuests: [cq, ...prev.completedQuests], inventory: loot ? [loot, ...prev.inventory] : prev.inventory, stats: ns };
+          if (q.mainQuestId && q.mainQuestId !== "side") {
+            next.mainQuests = prev.mainQuests.map(mq => {
+              if (mq.id !== q.mainQuestId || mq.completed) return mq;
+              const newEarned = mq.earnedXP + xpGain;
+              const nowComplete = newEarned >= mq.targetXP;
+              if (nowComplete) setTimeout(() => notify("🗺️ Main Quest Complete: " + mq.name + "!", "badge"), 900);
+              return { ...mq, earnedXP: newEarned, completed: nowComplete, completedAt: nowComplete ? new Date().toISOString() : null };
+            });
+          }
           const nb = checkBadges(next);
           if (nb.length) { next.badges = [...prev.badges, ...nb]; const bg = BADGES.find(b => b.id === nb[0]); setTimeout(() => notify("🏆 Badge: " + bg.name + "!", "badge"), 600); }
           floatXP(xpGain);
@@ -237,7 +249,7 @@
       function addQuest() {
         if (!qf.name.trim()) return;
         setState(p => ({ ...p, quests: [{ id: Date.now(), ...qf, createdAt: new Date().toISOString() }, ...p.quests] }));
-        setQf({ name: "", desc: "", difficulty: "Easy", category: "Work", recurring: "none" });
+        setQf({ name: "", desc: "", difficulty: "Easy", category: "Work", recurring: "none", mainQuestId: null });
         setShowNewQuest(false);
         notify("New quest added! ⚔️", "info");
       }
@@ -276,6 +288,15 @@
 
       function deleteQuest(qid) { setState(p => ({ ...p, quests: p.quests.filter(q => q.id !== qid) })); }
       function updateChar(f, v) { setState(p => ({ ...p, character: { ...p.character, [f]: v } })); }
+
+      function addMainQuest() {
+        if (!mf.name.trim()) return;
+        const mq = { id: Date.now(), name: mf.name, desc: mf.desc, category: mf.category, targetXP: mf.targetXP, earnedXP: 0, completed: false, completedAt: null, createdAt: new Date().toISOString() };
+        setState(p => ({ ...p, mainQuests: [mq, ...p.mainQuests] }));
+        setMf({ name: "", desc: "", category: "Work", targetXP: 500 });
+        setShowNewMainQuest(false);
+        notify("Main Quest begun! 🗺️", "info");
+      }
 
       function exportProgress() {
         const exportData = {
@@ -531,6 +552,122 @@
         );
       }
 
+      // ─── Render: Roadmap ────────────────────────────────────────
+      function renderRoadmap() {
+        const activeMain = state.mainQuests.filter(mq => !mq.completed);
+        const doneMain   = state.mainQuests.filter(mq => mq.completed);
+        const sideQuests = state.quests.filter(q => q.mainQuestId === "side");
+
+        return (
+          <div className="space-y-5">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h3 className="text-white font-black text-lg">🗺️ Storyline Roadmap</h3>
+              <button onClick={() => setShowNewMainQuest(true)} className="bg-gradient-to-r from-violet-500 to-purple-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:scale-105 transition-transform shadow-lg shadow-violet-500/30">+ Main Quest</button>
+            </div>
+
+            {state.mainQuests.length === 0 && (
+              <div className="text-center py-10 text-gray-500">
+                <div className="text-5xl mb-2">🗺️</div>
+                <p className="font-bold">No main quests yet!</p>
+                <p className="text-xs mt-1">Define your big goals — career, fitness, school — then link daily quests to them to track progress.</p>
+              </div>
+            )}
+
+            {activeMain.map(mq => {
+              const pct = Math.min(Math.round((mq.earnedXP / mq.targetXP) * 100), 100);
+              const linked = state.quests.filter(q => q.mainQuestId === mq.id);
+              return (
+                <Box key={mq.id} glow className="p-4 bg-gradient-to-br from-violet-900/40 to-indigo-900/30 border-violet-500/20">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xl">{(CATEGORIES[mq.category]||{}).icon||"🎯"}</span>
+                        <span className="text-white font-black text-base">{mq.name}</span>
+                        <span className="text-[10px] font-bold bg-violet-700/60 text-violet-200 px-1.5 py-0.5 rounded uppercase tracking-wide">Main Quest</span>
+                      </div>
+                      {mq.desc && <p className="text-gray-400 text-xs mt-0.5 ml-7">{mq.desc}</p>}
+                    </div>
+                    <span className="text-violet-300 font-black text-xs shrink-0 mt-0.5">{mq.earnedXP}/{mq.targetXP} XP</span>
+                  </div>
+                  <div className="h-3 bg-gray-800 rounded-full overflow-hidden border border-violet-600/40 mb-1">
+                    <div className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-400 rounded-full transition-all duration-700 relative overflow-hidden" style={{ width: pct + "%" }}>
+                      <div className="absolute inset-0 bg-gradient-to-b from-white/20 to-transparent" />
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-gray-500 font-bold mb-3">{pct}% complete · {linked.length} active quest{linked.length !== 1 ? "s" : ""} linked</div>
+                  {linked.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {linked.map(q => (
+                        <div key={q.id} className="flex items-center gap-2 bg-gray-800/60 rounded-lg px-2.5 py-1.5 text-xs">
+                          <span className="shrink-0">{(CATEGORIES[q.category]||{}).icon||"⚔️"}</span>
+                          <span className="text-gray-200 flex-1 truncate">{q.name}</span>
+                          <span className={"font-black px-1.5 py-0.5 rounded bg-gradient-to-r " + DIFFICULTY[q.difficulty].color + " text-white text-[9px] shrink-0"}>{q.difficulty}</span>
+                          <button onClick={() => completeQuest(q.id)} className="bg-green-600 hover:bg-green-500 text-white px-2 py-0.5 rounded font-bold transition-colors shrink-0">✓</button>
+                          <button onClick={() => deleteQuest(q.id)} className="text-gray-600 hover:text-red-400 transition-colors shrink-0">✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-gray-600 text-xs italic">No quests linked yet — create a quest and assign it to this main quest.</p>
+                  )}
+                </Box>
+              );
+            })}
+
+            {doneMain.length > 0 && (
+              <div>
+                <h4 className="text-gray-500 font-bold text-xs uppercase tracking-widest mb-2 mt-1">✅ Completed Main Quests</h4>
+                <div className="space-y-1.5">
+                  {doneMain.map(mq => (
+                    <div key={mq.id} className="flex items-center gap-2 p-2.5 rounded-lg bg-gray-900/50 border border-white/5 text-xs">
+                      <span>{(CATEGORIES[mq.category]||{}).icon||"🎯"}</span>
+                      <span className="text-gray-500 line-through flex-1 truncate">{mq.name}</span>
+                      <span className="text-green-400 font-bold shrink-0">{mq.earnedXP} XP</span>
+                      <span className="text-gray-600 shrink-0">{new Date(mq.completedAt).toLocaleDateString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Side Quests */}
+            <div>
+              <div className="flex items-center justify-between mb-2 mt-1">
+                <h3 className="text-white font-black text-base">🌿 Side Quests <span className="text-sm text-gray-400">({sideQuests.length})</span></h3>
+                <button onClick={() => { setQf(p => ({...p, mainQuestId: "side"})); setShowNewQuest(true); }} className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors border border-white/10">+ Side Quest</button>
+              </div>
+              {sideQuests.length === 0 ? (
+                <div className="text-center py-6 text-gray-600 border border-dashed border-gray-700 rounded-xl">
+                  <p className="font-bold text-sm">No active side quests.</p>
+                  <p className="text-xs mt-1">Tag a quest as "Side Quest" when creating it.</p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {sideQuests.map(q => (
+                    <Box key={q.id} className="p-3 hover:border-green-400/20 transition-all">
+                      <div className="flex items-center gap-3">
+                        <div className="text-xl shrink-0">{(CATEGORIES[q.category]||{}).icon||"⚔️"}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-white font-bold text-sm truncate">{q.name}</span>
+                            <span className={"text-[10px] font-black px-1.5 py-0.5 rounded bg-gradient-to-r " + DIFFICULTY[q.difficulty].color + " text-white"}>{q.difficulty}</span>
+                          </div>
+                          {q.desc && <p className="text-gray-400 text-xs truncate mt-0.5">{q.desc}</p>}
+                        </div>
+                        <div className="flex gap-1.5 shrink-0">
+                          <button onClick={() => completeQuest(q.id)} className="bg-gradient-to-r from-green-500 to-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:scale-110 transition-transform">✓</button>
+                          <button onClick={() => deleteQuest(q.id)} className="bg-gray-700/80 text-gray-400 px-2 py-1.5 rounded-lg text-xs hover:bg-red-600 hover:text-white transition-colors">✕</button>
+                        </div>
+                      </div>
+                    </Box>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+
       // ─── Render: Archive ────────────────────────────────────────
       function renderArchive() {
         const { category, difficulty, search } = archiveFilter;
@@ -648,6 +785,7 @@
           <nav className="sticky top-0 z-20 px-4 py-2 bg-gray-950/80 backdrop-blur-md border-b border-white/5">
             <div className="max-w-2xl mx-auto flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
               <Tab active={tab==="dashboard"} onClick={()=>setTab("dashboard")} badge={state.quests.length}>⚔️ Quests</Tab>
+              <Tab active={tab==="roadmap"} onClick={()=>setTab("roadmap")} badge={state.mainQuests.filter(m=>!m.completed).length}>🗺️ Roadmap</Tab>
               <Tab active={tab==="boss"} onClick={()=>setTab("boss")} badge={state.bossQuests.length}>🐲 Boss</Tab>
               <Tab active={tab==="inventory"} onClick={()=>setTab("inventory")}>🎒 Loot</Tab>
               <Tab active={tab==="badges"} onClick={()=>setTab("badges")}>🏆 Badges</Tab>
@@ -660,6 +798,7 @@
           <main className="relative z-10 px-4 py-4 pb-24">
             <div className="max-w-2xl mx-auto">
               {tab==="dashboard" && renderDashboard()}
+              {tab==="roadmap" && renderRoadmap()}
               {tab==="boss" && renderBoss()}
               {tab==="inventory" && renderInventory()}
               {tab==="badges" && renderBadges()}
@@ -696,6 +835,21 @@
                     {["none","daily","weekly","monthly"].map(r=><button key={r} onClick={()=>setQf(p=>({...p,recurring:r}))} className={"px-2.5 py-1.5 rounded-lg text-xs font-bold capitalize "+(qf.recurring===r?"bg-blue-500 text-white":"bg-gray-700 text-gray-400")}>{r==="none"?"One-time":r}</button>)}
                   </div>
                 </div>
+                <div>
+                  <label className="text-gray-400 text-xs font-bold block mb-1.5">Assign To</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button onClick={()=>setQf(p=>({...p,mainQuestId:null}))} className={"px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all "+(qf.mainQuestId===null?"bg-gray-500 text-white":"bg-gray-700 text-gray-400 hover:bg-gray-600")}>None</button>
+                    <button onClick={()=>setQf(p=>({...p,mainQuestId:"side"}))} className={"px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all "+(qf.mainQuestId==="side"?"bg-green-600 text-white":"bg-gray-700 text-gray-400 hover:bg-gray-600")}>🌿 Side Quest</button>
+                    {state.mainQuests.filter(mq=>!mq.completed).map(mq=>(
+                      <button key={mq.id} onClick={()=>setQf(p=>({...p,mainQuestId:mq.id}))} className={"px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all "+(qf.mainQuestId===mq.id?"bg-violet-600 text-white":"bg-gray-700 text-gray-400 hover:bg-gray-600")}>
+                        {(CATEGORIES[mq.category]||{}).icon||"🎯"} {mq.name}
+                      </button>
+                    ))}
+                  </div>
+                  {state.mainQuests.filter(mq=>!mq.completed).length === 0 && qf.mainQuestId === null && (
+                    <p className="text-gray-600 text-[10px] mt-1">Create a Main Quest in the 🗺️ Roadmap tab to link quests to your storyline.</p>
+                  )}
+                </div>
                 <div className="flex gap-2 pt-2">
                   <button onClick={addQuest} className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-2.5 rounded-xl font-bold hover:scale-[1.02] transition-transform shadow-lg">Accept Quest ⚔️</button>
                   <button onClick={()=>setShowNewQuest(false)} className="px-4 bg-gray-700 text-gray-300 py-2.5 rounded-xl font-bold hover:bg-gray-600">Cancel</button>
@@ -721,6 +875,36 @@
                 <div className="flex gap-2 pt-2">
                   <button onClick={addBoss} className="flex-1 bg-gradient-to-r from-red-500 to-orange-500 text-white py-2.5 rounded-xl font-bold hover:scale-[1.02] transition-transform shadow-lg">Begin Battle 🐲</button>
                   <button onClick={()=>setShowNewBoss(false)} className="px-4 bg-gray-700 text-gray-300 py-2.5 rounded-xl font-bold hover:bg-gray-600">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </Modal>
+
+          {/* New Main Quest Modal */}
+          <Modal show={showNewMainQuest} onClose={() => setShowNewMainQuest(false)}>
+            <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-2xl p-5 w-full max-w-md border border-violet-500/30 shadow-2xl">
+              <h3 className="text-white font-black text-lg mb-1">🗺️ New Main Quest</h3>
+              <p className="text-gray-500 text-xs mb-4">Define a major life goal. Link smaller quests to it to build progress.</p>
+              <div className="space-y-3">
+                <input className="w-full bg-gray-800 text-white rounded-lg px-3 py-2.5 text-sm border border-gray-600 focus:border-violet-400 outline-none placeholder-gray-500" placeholder="e.g. Build a Career, Get Fit, Finish Degree..." value={mf.name} onChange={e=>setMf(p=>({...p,name:e.target.value}))} maxLength={60} autoFocus />
+                <textarea className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-violet-400 outline-none resize-none h-16 placeholder-gray-500" placeholder="Describe your goal (optional)..." value={mf.desc} onChange={e=>setMf(p=>({...p,desc:e.target.value}))} maxLength={140} />
+                <div>
+                  <label className="text-gray-400 text-xs font-bold block mb-1.5">Category</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.keys(CATEGORIES).map(c=><button key={c} onClick={()=>setMf(p=>({...p,category:c}))} className={"px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all "+(mf.category===c?"bg-violet-500 text-white shadow scale-105":"bg-gray-700 text-gray-400 hover:bg-gray-600")}>{CATEGORIES[c].icon} {c}</button>)}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-gray-400 text-xs font-bold block mb-1.5">XP Target <span className="text-gray-600 font-normal">(total XP from linked quests to complete this)</span></label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[250, 500, 1000, 2500, 5000].map(v=>(
+                      <button key={v} onClick={()=>setMf(p=>({...p,targetXP:v}))} className={"px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all "+(mf.targetXP===v?"bg-violet-500 text-white scale-105":"bg-gray-700 text-gray-400 hover:bg-gray-600")}>{v >= 1000 ? (v/1000)+"k" : v} XP</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button onClick={addMainQuest} className="flex-1 bg-gradient-to-r from-violet-500 to-purple-600 text-white py-2.5 rounded-xl font-bold hover:scale-[1.02] transition-transform shadow-lg shadow-violet-500/30">Begin Main Quest 🗺️</button>
+                  <button onClick={()=>setShowNewMainQuest(false)} className="px-4 bg-gray-700 text-gray-300 py-2.5 rounded-xl font-bold hover:bg-gray-600">Cancel</button>
                 </div>
               </div>
             </div>
