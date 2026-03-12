@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuestForge — RPG Task Manager</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚔️</text></svg>" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    .scrollbar-hide::-webkit-scrollbar { display: none; }
+    .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+    * { -webkit-tap-highlight-color: transparent; }
+    body { margin: 0; padding: 0; background: #030712; }
+    @keyframes floatUp { 0% { opacity: 1; transform: translateY(0) scale(1); } 100% { opacity: 0; transform: translateY(-80px) scale(1.3); } }
+    .float-up { animation: floatUp 1.2s ease-out forwards; }
+    @keyframes glow { 0%,100% { box-shadow: 0 0 8px rgba(250,204,21,0.3); } 50% { box-shadow: 0 0 24px rgba(250,204,21,0.6); } }
+    .glow-pulse { animation: glow 2s ease-in-out infinite; }
+    @keyframes slideIn { 0% { opacity: 0; transform: translateY(-20px); } 100% { opacity: 1; transform: translateY(0); } }
+    .slide-in { animation: slideIn 0.3s ease-out; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    // ─── Constants ────────────────────────────────────────────────
+    const DIFFICULTY = {
+      Easy:   { xp: 25,  color: "from-green-400 to-emerald-500", lootChance: 0.2  },
+      Medium: { xp: 50,  color: "from-yellow-400 to-amber-500",  lootChance: 0.4  },
+      Hard:   { xp: 100, color: "from-orange-400 to-red-500",    lootChance: 0.6  },
+      Epic:   { xp: 200, color: "from-purple-500 to-pink-500",   lootChance: 0.85 },
+    };
+
+    const CATEGORIES = {
+      Work: { icon: "💼" }, Health: { icon: "💪" }, Home: { icon: "🏠" }, Personal: { icon: "🎯" },
+    };
+
+    const LOOT_TABLE = [
+      { name: "Potion of Focus",  icon: "🧪", rarity: "Common",    desc: "Boosts concentration for 1 hour" },
+      { name: "Iron Shield",      icon: "🛡️", rarity: "Common",    desc: "Blocks procrastination attacks" },
+      { name: "Speed Boots",      icon: "👢", rarity: "Uncommon",  desc: "Complete quests 2x faster" },
+      { name: "Fire Sword",       icon: "⚔️", rarity: "Uncommon",  desc: "Burns through tough tasks" },
+      { name: "Crystal Orb",      icon: "🔮", rarity: "Rare",      desc: "Reveals hidden quest paths" },
+      { name: "Dragon Scale",     icon: "🐉", rarity: "Rare",      desc: "Legendary armor material" },
+      { name: "Phoenix Feather",  icon: "🪶", rarity: "Epic",      desc: "Revives abandoned quests" },
+      { name: "Star Fragment",    icon: "✨", rarity: "Epic",      desc: "Grants bonus XP on use" },
+      { name: "Master Ball",      icon: "🔴", rarity: "Legendary", desc: "Captures any challenge" },
+      { name: "Arcane Tome",      icon: "📕", rarity: "Legendary", desc: "Unlocks ancient wisdom" },
+    ];
+
+    const RARITY_COLORS = { Common: "text-gray-300", Uncommon: "text-green-400", Rare: "text-blue-400", Epic: "text-purple-400", Legendary: "text-yellow-400" };
+
+    const BADGES = [
+      { id: "first_quest",  name: "First Steps",    icon: "🐣", desc: "Complete your first quest",         check: s => s.tc >= 1 },
+      { id: "ten_quests",   name: "Adventurer",     icon: "🗡️", desc: "Complete 10 quests",                check: s => s.tc >= 10 },
+      { id: "fifty_quests", name: "Veteran",         icon: "🎖️", desc: "Complete 50 quests",                check: s => s.tc >= 50 },
+      { id: "hundred",      name: "Legend",           icon: "👑", desc: "Complete 100 quests",               check: s => s.tc >= 100 },
+      { id: "streak_3",     name: "On Fire",          icon: "🔥", desc: "3-day streak",                     check: s => s.ds >= 3 },
+      { id: "streak_7",     name: "Unstoppable",      icon: "⚡", desc: "7-day streak",                     check: s => s.ds >= 7 },
+      { id: "streak_30",    name: "Ironclad",         icon: "💎", desc: "30-day streak",                    check: s => s.ds >= 30 },
+      { id: "boss_slayer",  name: "Boss Slayer",      icon: "🐲", desc: "Defeat a boss",                   check: s => s.bd >= 1 },
+      { id: "five_bosses",  name: "Dragon Tamer",     icon: "🏆", desc: "Defeat 5 bosses",                 check: s => s.bd >= 5 },
+      { id: "loot_10",      name: "Collector",        icon: "🎒", desc: "Collect 10 items",                check: s => s.tl >= 10 },
+      { id: "xp_1000",      name: "Power Up",         icon: "⬆️", desc: "Earn 1,000 XP",                   check: s => s.xp >= 1000 },
+      { id: "xp_10000",     name: "Ascended",         icon: "🌟", desc: "Earn 10,000 XP",                  check: s => s.xp >= 10000 },
+      { id: "combo_5",      name: "Combo King",       icon: "💥", desc: "Hit a 5x combo",                  check: s => s.mc >= 5 },
+      { id: "epic_clear",   name: "Epic Victor",      icon: "🏅", desc: "Complete an Epic quest",          check: s => s.ec >= 1 },
+      { id: "all_cats",     name: "Well Rounded",     icon: "🌈", desc: "Quest in every category",         check: s => s.cc >= 4 },
+      { id: "level_10",     name: "Double Digits",    icon: "🔟", desc: "Reach level 10",                  check: s => s.lv >= 10 },
+    ];
+
+    const AVATAR_OPTIONS = {
+      body:      ["🧑","👨","🧔","👦","🤴","🧙","🥷","🦸"],
+      hat:       ["🎩","⛑️","👒","🪖","👑","🎓","🧢",""],
+      companion: ["🐱","🐶","🐉","🦊","🐺","🦅","🐸","🔥"],
+      title:     ["Wanderer","Warrior","Sage","Striker","Shadow","Champion","Ranger","Mystic"],
+    };
+
+    const BOSS_NAMES = ["Shadow Procrastinator","Chaos Goblin","Burnout Dragon","Distraction Hydra","Overthink Specter"];
+    const xpForLevel = (lvl) => Math.floor(100 * Math.pow(1.25, lvl - 1));
+    const getToday = () => new Date().toISOString().split("T")[0];
+
+    const DEFAULT_STATE = {
+      character: { name: "Hero", body: "🧑", hat: "🎩", companion: "🐉", title: "Wanderer" },
+      level: 1, xp: 0, totalXP: 0,
+      quests: [], completedQuests: [], inventory: [], badges: [], bossQuests: [],
+      dailyStreak: 0, weeklyStreak: 0, monthlyStreak: 0,
+      lastCompletionDate: null, combo: 0, lastComboTime: null, maxCombo: 0,
+      stats: { totalCompleted: 0, bossesDefeated: 0, epicCompleted: 0, categoriesCompleted: [], totalLoot: 0 },
+    };
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem("questforge_save");
+        if (!raw) return DEFAULT_STATE;
+        const p = JSON.parse(raw);
+        if (!p.stats) p.stats = { ...DEFAULT_STATE.stats };
+        if (!Array.isArray(p.stats.categoriesCompleted)) p.stats.categoriesCompleted = [];
+        return { ...DEFAULT_STATE, ...p, stats: { ...DEFAULT_STATE.stats, ...p.stats } };
+      } catch { return DEFAULT_STATE; }
+    }
+    function saveState(state) { localStorage.setItem("questforge_save", JSON.stringify(state)); }
+
+    // ─── Reusable UI ──────────────────────────────────────────────
+    function Box({ children, className = "", glow = false }) {
+      return <div className={"relative rounded-xl border-2 border-white/10 bg-gradient-to-br from-white/[0.07] to-white/[0.02] backdrop-blur-sm " + (glow ? "shadow-lg shadow-yellow-400/20 glow-pulse " : "shadow-md ") + className}>{children}</div>;
+    }
+
+    function XPBar({ current, max, level }) {
+      const pct = Math.min((current / max) * 100, 100);
+      return (
+        <div className="w-full">
+          <div className="flex justify-between text-xs mb-1 font-bold"><span className="text-yellow-300">LVL {level}</span><span className="text-yellow-200">{current}/{max} XP</span></div>
+          <div className="h-4 bg-gray-800 rounded-full overflow-hidden border-2 border-yellow-600/50 relative">
+            <div className="h-full bg-gradient-to-r from-yellow-400 via-yellow-300 to-amber-400 rounded-full transition-all duration-700 relative overflow-hidden" style={{ width: pct + "%" }}>
+              <div className="absolute inset-0 bg-gradient-to-b from-white/30 to-transparent" />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Tab({ active, onClick, children, badge }) {
+      return (
+        <button onClick={onClick} className={"relative px-3 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all whitespace-nowrap " + (active ? "bg-gradient-to-b from-yellow-400 to-amber-500 text-gray-900 shadow-lg shadow-yellow-500/30 scale-105" : "bg-gray-800/80 text-gray-300 hover:bg-gray-700 hover:text-white")}>
+          {children}
+          {badge > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center text-white font-bold">{badge}</span>}
+        </button>
+      );
+    }
+
+    // ─── Main App ─────────────────────────────────────────────────
+    function QuestForge() {
+      const [state, setState]               = useState(loadState);
+      const [tab, setTab]                   = useState("dashboard");
+      const [showNewQuest, setShowNewQuest] = useState(false);
+      const [showNewBoss, setShowNewBoss]   = useState(false);
+      const [showCharEdit, setShowCharEdit] = useState(false);
+      const [notification, setNotification] = useState(null);
+      const [levelUpAnim, setLevelUpAnim]   = useState(false);
+      const [floats, setFloats]             = useState([]);
+      const [qf, setQf] = useState({ name: "", desc: "", difficulty: "Easy", category: "Work", recurring: "none" });
+      const [bf, setBf] = useState({ name: "", steps: ["","",""] });
+      const nt = useRef(null);
+
+      useEffect(() => { saveState(state); }, [state]);
+
+      const notify = useCallback((msg, type = "info") => {
+        clearTimeout(nt.current);
+        setNotification({ msg, type });
+        nt.current = setTimeout(() => setNotification(null), 3500);
+      }, []);
+
+      const floatXP = useCallback((amt) => {
+        const id = Date.now() + Math.random();
+        setFloats(p => [...p, { id, amt }]);
+        setTimeout(() => setFloats(p => p.filter(f => f.id !== id)), 1300);
+      }, []);
+
+      function addXP(amt, st) {
+        let nxp = st.xp + amt, nlv = st.level, ntxp = st.totalXP + amt, lv = false;
+        while (nxp >= xpForLevel(nlv)) { nxp -= xpForLevel(nlv); nlv++; lv = true; }
+        if (lv) { setLevelUpAnim(true); setTimeout(() => setLevelUpAnim(false), 2800); }
+        return { xp: nxp, level: nlv, totalXP: ntxp };
+      }
+
+      function updateStreak(st) {
+        const today = getToday(), last = st.lastCompletionDate;
+        let d = st.dailyStreak, w = st.weeklyStreak, m = st.monthlyStreak;
+        if (last !== today) {
+          const y = new Date(); y.setDate(y.getDate() - 1);
+          d = (last === y.toISOString().split("T")[0]) ? d + 1 : 1;
+          const ld = last ? new Date(last) : null;
+          if (ld) { const diff = Math.floor((new Date(today) - ld) / 86400000); w = diff <= 7 ? w+1 : 1; m = diff <= 31 ? m+1 : 1; } else { w = 1; m = 1; }
+        }
+        return { dailyStreak: d, weeklyStreak: w, monthlyStreak: m, lastCompletionDate: today };
+      }
+
+      function updateCombo(st) {
+        const now = Date.now();
+        const c = (st.lastComboTime && now - st.lastComboTime < 3600000) ? st.combo + 1 : 1;
+        return { combo: c, lastComboTime: now, maxCombo: Math.max(c, st.maxCombo) };
+      }
+
+      function rollLoot(diff) {
+        if (Math.random() > DIFFICULTY[diff].lootChance) return null;
+        const r = Math.random();
+        let pool;
+        if (r < 0.5) pool = LOOT_TABLE.filter(l => l.rarity === "Common");
+        else if (r < 0.8) pool = LOOT_TABLE.filter(l => l.rarity === "Uncommon");
+        else if (r < 0.95) pool = LOOT_TABLE.filter(l => l.rarity === "Rare");
+        else if (r < 0.99) pool = LOOT_TABLE.filter(l => l.rarity === "Epic");
+        else pool = LOOT_TABLE.filter(l => l.rarity === "Legendary");
+        return { ...pool[Math.floor(Math.random() * pool.length)], id: Date.now() + Math.random() };
+      }
+
+      function checkBadges(st) {
+        const c = { tc: st.stats.totalCompleted, bd: st.stats.bossesDefeated, ds: st.dailyStreak, tl: st.stats.totalLoot, xp: st.totalXP, mc: st.maxCombo, ec: st.stats.epicCompleted, cc: new Set(st.stats.categoriesCompleted).size, lv: st.level };
+        return BADGES.filter(b => !st.badges.includes(b.id) && b.check(c)).map(b => b.id);
+      }
+
+      function completeQuest(qid) {
+        setState(prev => {
+          const q = prev.quests.find(x => x.id === qid);
+          if (!q) return prev;
+          const cd = updateCombo(prev), sd = updateStreak(prev);
+          const cm = Math.min(cd.combo, 10), sm = sd.dailyStreak >= 7 ? 1.5 : sd.dailyStreak >= 3 ? 1.25 : 1;
+          const xpGain = Math.floor(DIFFICULTY[q.difficulty].xp * cm * sm);
+          const loot = rollLoot(q.difficulty);
+          const xd = addXP(xpGain, { ...prev, ...cd, ...sd });
+          const cats = new Set(prev.stats.categoriesCompleted); cats.add(q.category);
+          const ns = { ...prev.stats, totalCompleted: prev.stats.totalCompleted + 1, epicCompleted: prev.stats.epicCompleted + (q.difficulty === "Epic" ? 1 : 0), categoriesCompleted: [...cats], totalLoot: prev.stats.totalLoot + (loot ? 1 : 0) };
+          const cq = { ...q, completedAt: new Date().toISOString(), xpEarned: xpGain };
+          const next = { ...prev, ...xd, ...cd, ...sd, quests: prev.quests.filter(x => x.id !== qid), completedQuests: [cq, ...prev.completedQuests], inventory: loot ? [loot, ...prev.inventory] : prev.inventory, stats: ns };
+          const nb = checkBadges(next);
+          if (nb.length) { next.badges = [...prev.badges, ...nb]; const bg = BADGES.find(b => b.id === nb[0]); setTimeout(() => notify("🏆 Badge: " + bg.name + "!", "badge"), 600); }
+          floatXP(xpGain);
+          notify("+" + xpGain + " XP! " + (cm > 1 ? "(" + cm + "x Combo!) " : "") + (loot ? "Loot: " + loot.icon + " " + loot.name : ""), "success");
+          return next;
+        });
+      }
+
+      function addQuest() {
+        if (!qf.name.trim()) return;
+        setState(p => ({ ...p, quests: [{ id: Date.now(), ...qf, createdAt: new Date().toISOString() }, ...p.quests] }));
+        setQf({ name: "", desc: "", difficulty: "Easy", category: "Work", recurring: "none" });
+        setShowNewQuest(false);
+        notify("New quest added! ⚔️", "info");
+      }
+
+      function addBoss() {
+        if (!bf.name.trim() || bf.steps.filter(s => s.trim()).length < 2) return;
+        const vs = bf.steps.filter(s => s.trim());
+        const boss = { id: Date.now(), name: bf.name, bossName: BOSS_NAMES[Math.floor(Math.random() * BOSS_NAMES.length)], steps: vs.map((s,i) => ({ id: i, name: s, done: false })), hp: vs.length, maxHp: vs.length, createdAt: new Date().toISOString() };
+        setState(p => ({ ...p, bossQuests: [boss, ...p.bossQuests] }));
+        setBf({ name: "", steps: ["","",""] });
+        setShowNewBoss(false);
+        notify("Boss battle: " + boss.bossName + "! 🐲", "info");
+      }
+
+      function hitBoss(bid, sid) {
+        setState(prev => {
+          const boss = prev.bossQuests.find(b => b.id === bid);
+          if (!boss) return prev;
+          const ns = boss.steps.map(s => s.id === sid ? { ...s, done: true } : s);
+          const nhp = ns.filter(s => !s.done).length;
+          const xd = addXP(50, prev);
+          floatXP(50);
+          if (nhp <= 0) {
+            const loot = rollLoot("Epic");
+            const nst = { ...prev.stats, bossesDefeated: prev.stats.bossesDefeated + 1, totalLoot: prev.stats.totalLoot + (loot ? 1 : 0) };
+            const s1 = { ...prev, ...xd, bossQuests: prev.bossQuests.filter(b => b.id !== bid), completedQuests: [{ ...boss, completedAt: new Date().toISOString(), xpEarned: 200, type: "boss" }, ...prev.completedQuests], inventory: loot ? [loot, ...prev.inventory] : prev.inventory, stats: nst };
+            const bx = addXP(150, s1); s1.xp = bx.xp; s1.level = bx.level; s1.totalXP = bx.totalXP;
+            const nb = checkBadges(s1); if (nb.length) s1.badges = [...prev.badges, ...nb];
+            notify("🐲 BOSS DEFEATED! +200 XP!" + (loot ? " Loot: " + loot.icon : ""), "boss");
+            return s1;
+          }
+          notify("💥 Hit! +50 XP! HP: " + nhp + "/" + boss.maxHp, "success");
+          return { ...prev, ...xd, bossQuests: prev.bossQuests.map(b => b.id === bid ? { ...b, steps: ns, hp: nhp } : b) };
+        });
+      }
+
+      function deleteQuest(qid) { setState(p => ({ ...p, quests: p.quests.filter(q => q.id !== qid) })); }
+      function updateChar(f, v) { setState(p => ({ ...p, character: { ...p.character, [f]: v } })); }
+
+      // ─── Render: Dashboard ──────────────────────────────────────
+      function renderDashboard() {
+        return (
+          <div className="space-y-4">
+            <Box glow className="p-4 bg-gradient-to-br from-indigo-900/60 to-purple-900/40">
+              <div className="flex items-center gap-4">
+                <div className="relative cursor-pointer hover:scale-105 transition-transform" onClick={() => setShowCharEdit(true)}>
+                  <div className="w-20 h-20 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-4xl shadow-lg border-2 border-yellow-400/50">
+                    {state.character.hat && <span className="absolute -top-2 -left-1 text-xl">{state.character.hat}</span>}
+                    {state.character.body}
+                  </div>
+                  <span className="absolute -bottom-1 -right-1 text-lg">{state.character.companion}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-lg font-black text-white truncate">{state.character.name} <span className="text-yellow-400 text-sm">the {state.character.title}</span></h2>
+                  <XPBar current={state.xp} max={xpForLevel(state.level)} level={state.level} />
+                </div>
+              </div>
+              <div className="flex gap-2 mt-3 text-xs font-bold flex-wrap">
+                <span className="bg-red-500/30 text-red-300 px-2 py-1 rounded-lg">🔥 {state.dailyStreak} Day Streak</span>
+                <span className="bg-blue-500/30 text-blue-300 px-2 py-1 rounded-lg">⚡ {state.combo}x Combo</span>
+                <span className="bg-purple-500/30 text-purple-300 px-2 py-1 rounded-lg">🏆 {state.badges.length} Badges</span>
+                <span className="bg-green-500/30 text-green-300 px-2 py-1 rounded-lg">📦 {state.inventory.length} Items</span>
+              </div>
+            </Box>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {[{ l:"Quests Done",v:state.stats.totalCompleted,i:"✅",b:"from-green-600/40 to-emerald-700/30"},{l:"Total XP",v:state.totalXP,i:"⭐",b:"from-yellow-600/40 to-amber-700/30"},{l:"Bosses Slain",v:state.stats.bossesDefeated,i:"🐲",b:"from-red-600/40 to-rose-700/30"},{l:"Max Combo",v:state.maxCombo+"x",i:"💥",b:"from-purple-600/40 to-violet-700/30"}].map(s=>(
+                <div key={s.l} className={"bg-gradient-to-br "+s.b+" rounded-xl p-3 text-center border border-white/10"}>
+                  <div className="text-2xl">{s.i}</div><div className="text-white font-black text-lg">{s.v}</div><div className="text-gray-400 text-[10px] font-bold uppercase tracking-wide">{s.l}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between">
+              <h3 className="text-white font-black text-lg">⚔️ Active Quests <span className="text-sm text-yellow-400">({state.quests.length})</span></h3>
+              <button onClick={() => setShowNewQuest(true)} className="bg-gradient-to-r from-green-500 to-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:scale-105 transition-transform shadow-lg shadow-green-500/30">+ New Quest</button>
+            </div>
+
+            {state.quests.length === 0 ? (
+              <div className="text-center py-10 text-gray-500"><div className="text-5xl mb-2">🗺️</div><p className="font-bold">No active quests!</p><p className="text-xs mt-1">Add a quest to begin your adventure.</p></div>
+            ) : (
+              <div className="space-y-2">
+                {state.quests.map(q => (
+                  <Box key={q.id} className="p-3 hover:border-yellow-400/30 transition-all">
+                    <div className="flex items-center gap-3">
+                      <div className="text-2xl">{(CATEGORIES[q.category]||{}).icon||"⚔️"}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-white font-bold text-sm truncate">{q.name}</span>
+                          <span className={"text-[10px] font-black px-1.5 py-0.5 rounded bg-gradient-to-r "+DIFFICULTY[q.difficulty].color+" text-white"}>{q.difficulty}</span>
+                          <span className="text-[10px] text-gray-500">{DIFFICULTY[q.difficulty].xp} XP</span>
+                        </div>
+                        {q.desc && <p className="text-gray-400 text-xs truncate mt-0.5">{q.desc}</p>}
+                      </div>
+                      <div className="flex gap-1.5 shrink-0">
+                        <button onClick={() => completeQuest(q.id)} className="bg-gradient-to-r from-green-500 to-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:scale-110 transition-transform shadow-md shadow-green-500/30">✓ Done</button>
+                        <button onClick={() => deleteQuest(q.id)} className="bg-gray-700/80 text-gray-400 px-2 py-1.5 rounded-lg text-xs hover:bg-red-600 hover:text-white transition-colors">✕</button>
+                      </div>
+                    </div>
+                  </Box>
+                ))}
+              </div>
+            )}
+
+            {state.bossQuests.length > 0 && (
+              <div>
+                <h3 className="text-white font-black text-lg mt-2">🐲 Active Bosses</h3>
+                {state.bossQuests.map(boss => (
+                  <Box key={boss.id} glow className="p-4 mt-2 bg-gradient-to-br from-red-900/40 to-orange-900/20 border-red-500/20">
+                    <div className="flex items-center justify-between mb-2">
+                      <div><h4 className="text-white font-black">{boss.name}</h4><p className="text-red-400 text-xs font-bold">vs {boss.bossName}</p></div>
+                      <span className="text-red-400 font-black text-sm">❤️ {boss.hp}/{boss.maxHp}</span>
+                    </div>
+                    <div className="h-3 bg-gray-800 rounded-full overflow-hidden mb-3 border border-red-600/40">
+                      <div className="h-full bg-gradient-to-r from-red-500 to-orange-500 transition-all duration-500 rounded-full" style={{ width: (boss.hp/boss.maxHp*100)+"%" }} />
+                    </div>
+                    <div className="space-y-1.5">
+                      {boss.steps.map(step => (
+                        <div key={step.id} className={"flex items-center gap-2 p-2 rounded-lg text-xs "+(step.done?"bg-green-900/30 line-through text-gray-500":"bg-gray-800/50 text-gray-200")}>
+                          {!step.done ? <button onClick={() => hitBoss(boss.id, step.id)} className="bg-red-500 text-white px-2 py-1 rounded font-bold hover:bg-red-400 transition-colors shrink-0 text-xs">⚔️ Attack</button> : <span className="text-green-400 shrink-0">✅</span>}
+                          <span>{step.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </Box>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // ─── Render: Boss Tab ───────────────────────────────────────
+      function renderBoss() {
+        return (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-white font-black text-lg">🐲 Boss Battles</h3>
+              <button onClick={() => setShowNewBoss(true)} className="bg-gradient-to-r from-red-500 to-orange-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:scale-105 transition-transform shadow-lg shadow-red-500/30">+ New Boss</button>
+            </div>
+            {state.bossQuests.length === 0 ? (
+              <div className="text-center py-10 text-gray-500"><div className="text-5xl mb-2">🐲</div><p className="font-bold">No active boss battles!</p><p className="text-xs mt-1">Create a boss for multi-step projects.</p></div>
+            ) : state.bossQuests.map(boss => (
+              <Box key={boss.id} glow className="p-4 bg-gradient-to-br from-red-900/40 to-orange-900/20 border-red-500/20">
+                <div className="flex items-center justify-between mb-2">
+                  <div><h4 className="text-white font-black text-lg">{boss.name}</h4><p className="text-red-400 text-xs font-bold">⚔️ vs {boss.bossName}</p></div>
+                  <span className="text-red-400 font-black">❤️ {boss.hp}/{boss.maxHp}</span>
+                </div>
+                <div className="h-4 bg-gray-800 rounded-full overflow-hidden mb-4 border border-red-600/40">
+                  <div className="h-full bg-gradient-to-r from-red-500 via-orange-500 to-red-400 transition-all duration-700 rounded-full" style={{ width: (boss.hp/boss.maxHp*100)+"%" }} />
+                </div>
+                <div className="space-y-2">
+                  {boss.steps.map(step => (
+                    <div key={step.id} className={"flex items-center gap-3 p-2.5 rounded-lg "+(step.done?"bg-green-900/30":"bg-gray-800/60")}>
+                      {!step.done ? <button onClick={() => hitBoss(boss.id, step.id)} className="bg-gradient-to-r from-red-500 to-orange-500 text-white px-3 py-1 rounded-lg text-xs font-bold hover:scale-105 transition-transform shadow shadow-red-500/30 shrink-0">⚔️ Attack!</button> : <span className="text-green-400 text-lg shrink-0">✅</span>}
+                      <span className={"text-sm "+(step.done?"line-through text-gray-500":"text-white font-semibold")}>{step.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </Box>
+            ))}
+          </div>
+        );
+      }
+
+      // ─── Render: Inventory ──────────────────────────────────────
+      function renderInventory() {
+        return (
+          <div className="space-y-4">
+            <h3 className="text-white font-black text-lg">🎒 Inventory ({state.inventory.length})</h3>
+            {state.inventory.length === 0 ? (
+              <div className="text-center py-10 text-gray-500"><div className="text-5xl mb-2">📦</div><p className="font-bold">Empty!</p><p className="text-xs mt-1">Complete quests for loot.</p></div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {state.inventory.map((item,i) => (
+                  <Box key={item.id||i} className="p-3 flex items-center gap-3">
+                    <div className="text-3xl">{item.icon}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2"><span className="text-white font-bold text-sm">{item.name}</span><span className={"text-[10px] font-black "+RARITY_COLORS[item.rarity]}>[{item.rarity}]</span></div>
+                      <p className="text-gray-400 text-xs">{item.desc}</p>
+                    </div>
+                  </Box>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // ─── Render: Badges ─────────────────────────────────────────
+      function renderBadges() {
+        return (
+          <div className="space-y-4">
+            <h3 className="text-white font-black text-lg">🏆 Achievements ({state.badges.length}/{BADGES.length})</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {BADGES.map(b => {
+                const u = state.badges.includes(b.id);
+                return <div key={b.id} className={"rounded-xl p-3 text-center border transition-all "+(u?"bg-gradient-to-br from-yellow-900/40 to-amber-900/20 border-yellow-500/40 shadow-md shadow-yellow-400/10":"bg-gray-900/40 border-gray-700/30 opacity-40")}><div className={"text-3xl mb-1 "+(u?"":"grayscale")}>{b.icon}</div><div className={"text-xs font-black "+(u?"text-yellow-300":"text-gray-500")}>{b.name}</div><div className="text-[10px] text-gray-500 mt-0.5">{b.desc}</div></div>;
+              })}
+            </div>
+          </div>
+        );
+      }
+
+      // ─── Render: Character ──────────────────────────────────────
+      function renderCharacter() {
+        return (
+          <div className="space-y-4">
+            <h3 className="text-white font-black text-lg">🧙 Character</h3>
+            <Box glow className="p-6 bg-gradient-to-br from-indigo-900/60 to-purple-900/40 text-center">
+              <div className="relative inline-block">
+                <div className="w-28 h-28 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-6xl mx-auto shadow-xl border-2 border-yellow-400/50">
+                  {state.character.hat && <span className="absolute -top-3 left-2 text-3xl">{state.character.hat}</span>}
+                  {state.character.body}
+                </div>
+                <span className="absolute -bottom-1 -right-1 text-3xl">{state.character.companion}</span>
+              </div>
+              <div className="mt-3">
+                <input className="bg-transparent text-center text-white font-black text-xl border-b-2 border-yellow-400/50 focus:border-yellow-400 outline-none w-48" value={state.character.name} onChange={e => updateChar("name", e.target.value)} maxLength={20} />
+                <p className="text-yellow-400 font-bold text-sm mt-1">The {state.character.title}</p>
+                <p className="text-gray-400 text-xs mt-1">Level {state.level} • {state.totalXP} Total XP</p>
+              </div>
+            </Box>
+            {Object.entries(AVATAR_OPTIONS).map(([field, options]) => (
+              <div key={field}>
+                <h4 className="text-gray-300 font-bold text-sm capitalize mb-2">{field}</h4>
+                <div className="flex flex-wrap gap-2">
+                  {options.map(opt => (
+                    <button key={opt||"none"} onClick={() => updateChar(field, opt)} className={"w-10 h-10 rounded-xl flex items-center justify-center text-xl transition-all "+(state.character[field]===opt?"bg-yellow-500 scale-110 shadow-lg shadow-yellow-500/30 border-2 border-yellow-300":"bg-gray-800 hover:bg-gray-700 border border-gray-600")}>{opt||"—"}</button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      }
+
+      // ─── Render: History ────────────────────────────────────────
+      function renderHistory() {
+        return (
+          <div className="space-y-4">
+            <h3 className="text-white font-black text-lg">📜 Stats & History</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {[{l:"Completed",v:state.stats.totalCompleted},{l:"Total XP",v:state.totalXP},{l:"Level",v:state.level},{l:"Day Streak",v:state.dailyStreak},{l:"Week Streak",v:state.weeklyStreak},{l:"Bosses Slain",v:state.stats.bossesDefeated},{l:"Items Found",v:state.stats.totalLoot},{l:"Best Combo",v:state.maxCombo+"x"}].map(s=>(
+                <div key={s.l} className="bg-gray-800/60 rounded-xl p-2.5 text-center border border-white/5"><div className="text-white font-black text-lg">{s.v}</div><div className="text-gray-500 text-[10px] font-bold uppercase tracking-wide">{s.l}</div></div>
+              ))}
+            </div>
+            {state.completedQuests.length === 0 ? (
+              <div className="text-center py-10 text-gray-500"><div className="text-5xl mb-2">📜</div><p className="font-bold">No history yet!</p></div>
+            ) : (
+              <div className="space-y-1.5 max-h-[28rem] overflow-y-auto pr-1">
+                {state.completedQuests.slice(0,50).map((q,i)=>(
+                  <div key={i} className="flex items-center gap-2 p-2.5 rounded-lg bg-gray-800/40 border border-white/5 text-xs">
+                    <span>{q.type==="boss"?"🐲":((CATEGORIES[q.category]||{}).icon||"⚔️")}</span>
+                    <span className="text-white font-bold flex-1 truncate">{q.name}</span>
+                    <span className="text-yellow-400 font-bold shrink-0">+{q.xpEarned} XP</span>
+                    <span className="text-gray-600 shrink-0">{new Date(q.completedAt).toLocaleDateString()}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // ─── Modals ─────────────────────────────────────────────────
+      function Modal({ show, onClose, children }) {
+        if (!show) return null;
+        return (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
+            <div className="slide-in" onClick={e => e.stopPropagation()}>{children}</div>
+          </div>
+        );
+      }
+
+      // ─── Main Layout ───────────────────────────────────────────
+      return (
+        <div className="min-h-screen bg-gradient-to-b from-gray-950 via-indigo-950 to-gray-950 text-white relative overflow-hidden" style={{ fontFamily: "'Trebuchet MS','Lucida Sans',sans-serif" }}>
+          <div className="fixed inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage:"radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize:"40px 40px" }} />
+
+          {floats.map(f => <div key={f.id} className="fixed top-1/3 left-1/2 -translate-x-1/2 z-50 pointer-events-none float-up"><span className="text-yellow-400 font-black text-4xl" style={{ textShadow:"0 0 20px rgba(250,204,21,0.8)" }}>+{f.amt} XP</span></div>)}
+
+          {levelUpAnim && <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none"><div className="animate-bounce"><div className="text-5xl sm:text-7xl font-black text-yellow-400 text-center" style={{ textShadow:"0 0 40px rgba(250,204,21,0.8),0 0 80px rgba(250,204,21,0.4)" }}><div className="animate-pulse">⚡ LEVEL UP! ⚡</div><div className="text-2xl sm:text-4xl mt-2">Level {state.level}</div></div></div></div>}
+
+          {notification && <div className={"fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl font-bold text-sm shadow-xl border slide-in "+(notification.type==="success"?"bg-green-600 border-green-400 text-white":notification.type==="boss"?"bg-gradient-to-r from-red-600 to-orange-500 border-red-400 text-white":notification.type==="badge"?"bg-gradient-to-r from-yellow-500 to-amber-500 border-yellow-300 text-gray-900":"bg-blue-600 border-blue-400 text-white")} style={{ maxWidth:"90vw" }}>{notification.msg}</div>}
+
+          <header className="relative z-10 px-4 pt-4 pb-2">
+            <div className="max-w-2xl mx-auto flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-3xl">⚔️</span>
+                <div><h1 className="text-xl font-black bg-gradient-to-r from-yellow-300 via-amber-400 to-yellow-500 bg-clip-text text-transparent leading-tight">QuestForge</h1><p className="text-[10px] text-gray-500 font-bold -mt-0.5">RPG Task Manager</p></div>
+              </div>
+              <div className="text-right"><span className="text-yellow-400 font-black text-sm">LVL {state.level}</span><div className="text-gray-500 text-[10px]">{state.totalXP} XP</div></div>
+            </div>
+          </header>
+
+          <nav className="sticky top-0 z-20 px-4 py-2 bg-gray-950/80 backdrop-blur-md border-b border-white/5">
+            <div className="max-w-2xl mx-auto flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+              <Tab active={tab==="dashboard"} onClick={()=>setTab("dashboard")} badge={state.quests.length}>⚔️ Quests</Tab>
+              <Tab active={tab==="boss"} onClick={()=>setTab("boss")} badge={state.bossQuests.length}>🐲 Boss</Tab>
+              <Tab active={tab==="inventory"} onClick={()=>setTab("inventory")}>🎒 Loot</Tab>
+              <Tab active={tab==="badges"} onClick={()=>setTab("badges")}>🏆 Badges</Tab>
+              <Tab active={tab==="character"} onClick={()=>setTab("character")}>🧙 Hero</Tab>
+              <Tab active={tab==="history"} onClick={()=>setTab("history")}>📜 Stats</Tab>
+            </div>
+          </nav>
+
+          <main className="relative z-10 px-4 py-4 pb-24">
+            <div className="max-w-2xl mx-auto">
+              {tab==="dashboard" && renderDashboard()}
+              {tab==="boss" && renderBoss()}
+              {tab==="inventory" && renderInventory()}
+              {tab==="badges" && renderBadges()}
+              {tab==="character" && renderCharacter()}
+              {tab==="history" && renderHistory()}
+            </div>
+          </main>
+
+          {tab==="dashboard" && <button onClick={()=>setShowNewQuest(true)} className="fixed bottom-6 right-6 z-30 w-14 h-14 rounded-full bg-gradient-to-br from-yellow-400 to-amber-500 text-gray-900 text-2xl font-black shadow-xl shadow-yellow-500/30 hover:scale-110 transition-transform flex items-center justify-center border-2 border-yellow-300">+</button>}
+
+          {/* New Quest Modal */}
+          <Modal show={showNewQuest} onClose={() => setShowNewQuest(false)}>
+            <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-2xl p-5 w-full max-w-md border border-yellow-500/30 shadow-2xl">
+              <h3 className="text-white font-black text-lg mb-4">⚔️ New Quest</h3>
+              <div className="space-y-3">
+                <input className="w-full bg-gray-800 text-white rounded-lg px-3 py-2.5 text-sm border border-gray-600 focus:border-yellow-400 outline-none placeholder-gray-500" placeholder="Quest name..." value={qf.name} onChange={e=>setQf(p=>({...p,name:e.target.value}))} maxLength={60} autoFocus />
+                <textarea className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-yellow-400 outline-none resize-none h-16 placeholder-gray-500" placeholder="Description (optional)..." value={qf.desc} onChange={e=>setQf(p=>({...p,desc:e.target.value}))} maxLength={140} />
+                <div>
+                  <label className="text-gray-400 text-xs font-bold block mb-1.5">Difficulty</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.keys(DIFFICULTY).map(d=><button key={d} onClick={()=>setQf(p=>({...p,difficulty:d}))} className={"px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all "+(qf.difficulty===d?"bg-gradient-to-r "+DIFFICULTY[d].color+" text-white scale-105 shadow":"bg-gray-700 text-gray-400 hover:bg-gray-600")}>{d} ({DIFFICULTY[d].xp})</button>)}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-gray-400 text-xs font-bold block mb-1.5">Category</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.keys(CATEGORIES).map(c=><button key={c} onClick={()=>setQf(p=>({...p,category:c}))} className={"px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all "+(qf.category===c?"bg-yellow-500 text-gray-900 shadow":"bg-gray-700 text-gray-400 hover:bg-gray-600")}>{CATEGORIES[c].icon} {c}</button>)}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-gray-400 text-xs font-bold block mb-1.5">Recurring</label>
+                  <div className="flex gap-1.5">
+                    {["none","daily","weekly","monthly"].map(r=><button key={r} onClick={()=>setQf(p=>({...p,recurring:r}))} className={"px-2.5 py-1.5 rounded-lg text-xs font-bold capitalize "+(qf.recurring===r?"bg-blue-500 text-white":"bg-gray-700 text-gray-400")}>{r==="none"?"One-time":r}</button>)}
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button onClick={addQuest} className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-2.5 rounded-xl font-bold hover:scale-[1.02] transition-transform shadow-lg">Accept Quest ⚔️</button>
+                  <button onClick={()=>setShowNewQuest(false)} className="px-4 bg-gray-700 text-gray-300 py-2.5 rounded-xl font-bold hover:bg-gray-600">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </Modal>
+
+          {/* New Boss Modal */}
+          <Modal show={showNewBoss} onClose={() => setShowNewBoss(false)}>
+            <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-2xl p-5 w-full max-w-md border border-red-500/30 shadow-2xl">
+              <h3 className="text-white font-black text-lg mb-4">🐲 New Boss Battle</h3>
+              <div className="space-y-3">
+                <input className="w-full bg-gray-800 text-white rounded-lg px-3 py-2.5 text-sm border border-gray-600 focus:border-red-400 outline-none placeholder-gray-500" placeholder="Project name..." value={bf.name} onChange={e=>setBf(p=>({...p,name:e.target.value}))} maxLength={60} autoFocus />
+                <label className="text-gray-400 text-xs font-bold block">Steps (each = 1 Boss HP)</label>
+                {bf.steps.map((step,i)=>(
+                  <div key={i} className="flex gap-2">
+                    <input className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm border border-gray-600 focus:border-red-400 outline-none placeholder-gray-500" placeholder={"Step "+(i+1)+"..."} value={step} onChange={e=>{const s=[...bf.steps];s[i]=e.target.value;setBf(p=>({...p,steps:s}));}} maxLength={80} />
+                    {i>=2 && <button onClick={()=>setBf(p=>({...p,steps:p.steps.filter((_,j)=>j!==i)}))} className="text-red-400 px-2 hover:text-red-300 text-lg">✕</button>}
+                  </div>
+                ))}
+                {bf.steps.length < 8 && <button onClick={()=>setBf(p=>({...p,steps:[...p.steps,""]}))} className="text-blue-400 text-xs font-bold hover:text-blue-300">+ Add Step</button>}
+                <div className="flex gap-2 pt-2">
+                  <button onClick={addBoss} className="flex-1 bg-gradient-to-r from-red-500 to-orange-500 text-white py-2.5 rounded-xl font-bold hover:scale-[1.02] transition-transform shadow-lg">Begin Battle 🐲</button>
+                  <button onClick={()=>setShowNewBoss(false)} className="px-4 bg-gray-700 text-gray-300 py-2.5 rounded-xl font-bold hover:bg-gray-600">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </Modal>
+
+          {/* Character Edit Modal */}
+          <Modal show={showCharEdit} onClose={() => setShowCharEdit(false)}>
+            <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-2xl p-5 w-full max-w-sm border border-purple-500/30 shadow-2xl max-h-[90vh] overflow-y-auto">
+              <h3 className="text-white font-black text-lg mb-4">🧙 Quick Edit</h3>
+              <input className="w-full bg-gray-800 text-white rounded-lg px-3 py-2.5 text-sm border border-gray-600 focus:border-purple-400 outline-none mb-3 placeholder-gray-500" value={state.character.name} onChange={e=>updateChar("name",e.target.value)} maxLength={20} />
+              {Object.entries(AVATAR_OPTIONS).map(([field,options])=>(
+                <div key={field} className="mb-3">
+                  <label className="text-gray-400 text-xs font-bold capitalize block mb-1.5">{field}</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {options.map(opt=><button key={opt||"none"} onClick={()=>updateChar(field,opt)} className={"w-9 h-9 rounded-lg flex items-center justify-center text-lg transition-all "+(state.character[field]===opt?"bg-purple-500 scale-110 border-2 border-purple-300":"bg-gray-700 hover:bg-gray-600 border border-gray-600")}>{opt||"—"}</button>)}
+                  </div>
+                </div>
+              ))}
+              <button onClick={()=>setShowCharEdit(false)} className="w-full bg-gradient-to-r from-purple-600 to-violet-600 text-white py-2.5 rounded-xl font-bold mt-2 hover:scale-[1.02] transition-transform shadow-lg">Done ✓</button>
+            </div>
+          </Modal>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(QuestForge));
+  </script>
+</body>
+</html>
